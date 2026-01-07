@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>静谧回响 | The Quiet Oracle</title>
+    
+    <!-- Libraries -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel Standalone for in-browser JSX/TS compilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@200;300;400;500;700&display=swap" rel="stylesheet">
+    
+    <style>
+      body {
+        font-family: 'Noto Serif SC', serif;
+        background-color: #050505;
+        color: #e0e0e0;
+        overflow: hidden;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      /* Custom scrollbar hiding */
+      .no-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+      .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+      /* 3D Scene setup */
+      .scene-3d {
+        perspective: 1200px;
+        transform-style: preserve-3d;
+      }
+      /* Animations */
+      @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+      }
+      .animate-fadeIn {
+          animation: fadeIn 1s ease-out forwards;
+      }
+      @keyframes slowReveal {
+          from { opacity: 0; }
+          to { opacity: 1; }
+      }
+      .animate-slowReveal {
+          animation: slowReveal 1.5s ease-out forwards;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-presets="typescript,react">
+      const { useState, useEffect, useRef, useCallback } = React;
+
+      // ----------------------------------------------------------------------
+      // TYPES (Stripped by Babel, but kept for reference structure)
+      // ----------------------------------------------------------------------
+      type AppStep = 'mood' | 'vent' | 'select' | 'reveal';
+      type MoodType = 'tired' | 'annoyed' | 'low' | 'empty' | 'confused' | 'okay';
+      type ToneType = 'gentle' | 'sober' | 'light';
+
+      interface CardContent {
+        id: string;
+        tag: string;
+        empathy: string;
+        response: {
+          gentle: string;
+          sober: string;
+          light: string;
+        };
+        action: {
+          gentle: string;
+          sober: string;
+          light: string;
+        };
+      }
+
+      interface HistoryItem {
+        id: string;
+        timestamp: number;
+        cardId: string;
+        mood: MoodType;
+        tone: ToneType;
+        userNote?: string;
+      }
+
+      // ----------------------------------------------------------------------
+      // CONSTANTS
+      // ----------------------------------------------------------------------
+      const MOODS = [
+        { id: 'tired', label: '有点累' },
+        { id: 'annoyed', label: '有点烦' },
+        { id: 'low', label: '有点低落' },
+        { id: 'empty', label: '有点空' },
+        { id: 'confused', label: '说不清' },
+        { id: 'okay', label: '其实还好' },
+      ];
+
+      const generateId = (prefix, index) => `${prefix}-${index}`;
+
+      const BASE_CARDS = [
+        {
+          tag: '#暂停',
+          empathy: '一直赶路的人，连灵魂都会跟不上。',
+          response: {
+            gentle: '世界不会因为你停下一分钟就崩塌。',
+            sober: '休息是物理需求，不是道德缺陷。',
+            light: '今天先挂机，明天再上线。'
+          },
+          action: {
+            gentle: '闭上眼睛，深呼吸三次。',
+            sober: '放下手机，看窗外一分钟。',
+            light: '去倒一杯温水喝完它。'
+          }
+        },
+        {
+          tag: '#边界',
+          empathy: '那些让你不舒服的要求，其实可以拒绝。',
+          response: {
+            gentle: '保护自己的感受，不是自私。',
+            sober: '你的善良，需要带点锋芒。',
+            light: '把“不行”挂在嘴边试试看。'
+          },
+          action: {
+            gentle: '对自己说一遍：我有权拒绝。',
+            sober: '删掉那个让你不舒服的对话框。',
+            light: '设一个勿扰模式。'
+          }
+        },
+        {
+          tag: '#松弛',
+          empathy: '你是不是把发条拧得太紧了？',
+          response: {
+            gentle: '允许自己偶尔做不好，也是一种能力。',
+            sober: '紧绷改变不了结果，只能消耗你。',
+            light: '今天当个废柴也没关系。'
+          },
+          action: {
+            gentle: '把肩膀沉下来。',
+            sober: '列出今天不想做的三件事。',
+            light: '找个舒服的姿势瘫着。'
+          }
+        },
+        {
+          tag: '#自洽',
+          empathy: '总是想要讨好别人，一定很辛苦吧。',
+          response: {
+            gentle: '你不需要通过别人的认可来确认自己的存在。',
+            sober: '做你自己，而不是完美的自己。',
+            light: '管他们呢，你开心最重要。'
+          },
+          action: {
+            gentle: '抱抱自己。',
+            sober: '照镜子，夸自己一句。',
+            light: '买个自己喜欢的小零食。'
+          }
+        },
+        {
+          tag: '#允许',
+          empathy: '情绪没有好坏，它们只是路过。',
+          response: {
+            gentle: '难过的时候，就好好难过。',
+            sober: '压抑只会反弹，释放才是解脱。',
+            light: '哭出来，排毒养颜。'
+          },
+          action: {
+            gentle: '找个没人的地方叹口气。',
+            sober: '写下三个当下的感受。',
+            light: '听一首悲伤的歌。'
+          }
+        },
+        {
+          tag: '#勇气',
+          empathy: '面对未知，害怕是很正常的。',
+          response: {
+            gentle: '你比你想象的要坚强得多。',
+            sober: '行动是治愈恐惧的良药。',
+            light: '闭眼冲，万一赢了呢？'
+          },
+          action: {
+            gentle: '回顾一次你克服困难的经历。',
+            sober: '做一件拖延了很久的小事。',
+            light: '握紧拳头给自己打气。'
+          }
+        },
+        {
+          tag: '#等待',
+          empathy: '不是所有种子都会在春天发芽。',
+          response: {
+            gentle: '给自己一点时间，生长需要过程。',
+            sober: '急于求成通常是焦虑在作祟。',
+            light: '让子弹再飞一会儿。'
+          },
+          action: {
+            gentle: '看一朵云慢慢飘过。',
+            sober: '接受现状，专注于手头的事。',
+            light: '煮一杯需要时间的咖啡。'
+          }
+        },
+        {
+          tag: '#告别',
+          empathy: '有些故事，到了该翻篇的时候。',
+          response: {
+            gentle: '离别是为了更好的重逢，或者更好的自己。',
+            sober: '沉没成本不应该成为你未来的包袱。',
+            light: '拜拜就拜拜，下一个更乖。'
+          },
+          action: {
+            gentle: '清理一件不再需要的物品。',
+            sober: '删掉一张旧照片。',
+            light: '大声说一句“再见”。'
+          }
+        },
+        {
+          tag: '#关系',
+          empathy: '人和人的频率，不一样也没关系。',
+          response: {
+            gentle: '懂你的人，不需要解释太多。',
+            sober: '不要试图改变别人，那是上帝的工作。',
+            light: '合则来，不合则散。'
+          },
+          action: {
+            gentle: '给重要的人发个表情包。',
+            sober: '停止一段无效的沟通。',
+            light: '去撸猫/狗。'
+          }
+        },
+        {
+          tag: '#当下',
+          empathy: '担忧明天，并不会让今天变得更好。',
+          response: {
+            gentle: '你拥有的只有此时此刻。',
+            sober: '焦虑是对未来的透支。',
+            light: '今朝有酒今朝醉。'
+          },
+          action: {
+            gentle: '感受脚踩在地面的感觉。',
+            sober: '专注于呼吸一分钟。',
+            light: '吃一口好吃的，细嚼慢咽。'
+          }
+        },
+        {
+          tag: '#空白',
+          empathy: '不知道去哪里的时候，停在原地也可以。',
+          response: {
+            gentle: '迷茫说明你在思考更多的可能性。',
+            sober: '没有方向也是一种方向。',
+            light: '随便走走，也许有惊喜。'
+          },
+          action: {
+            gentle: '发呆五分钟。',
+            sober: '观察路边的一棵树。',
+            light: '在这个路口转个弯。'
+          }
+        },
+        {
+          tag: '#微光',
+          empathy: '哪怕只有一点点光，也足以照亮脚下的路。',
+          response: {
+            gentle: '相信美好的事情即将发生。',
+            sober: '绝望中往往蕴含着转机。',
+            light: '星星一直都在，只是有时候云多了点。'
+          },
+          action: {
+            gentle: '记录一件今天发生的小确幸。',
+            sober: '整理一下房间的角落。',
+            light: '把窗帘拉开。'
+          }
+        },
+        {
+          tag: '#坚韧',
+          empathy: '风雨很大，但你扎根很深。',
+          response: {
+            gentle: '你比风暴更持久。',
+            sober: '困难是成长的磨刀石。',
+            light: '打不死我的，只会让我更强大。'
+          },
+          action: {
+            gentle: '抚摸一下粗糙的墙面或树干。',
+            sober: '坚持做完今天的运动。',
+            light: '挺直腰背坐好。'
+          }
+        },
+        {
+          tag: '#原谅',
+          empathy: '那个不够完美的自己，也值得被爱。',
+          response: {
+            gentle: '和自己和解，是终身的浪漫。',
+            sober: '苛责自己解决不了任何问题。',
+            light: '给自己发一张好人卡。'
+          },
+          action: {
+            gentle: '对自己说“没关系”。',
+            sober: '停止自我攻击。',
+            light: '吃顿好的犒劳自己。'
+          }
+        },
+        {
+          tag: '#流动',
+          empathy: '不要试图抓住水，让它流过你。',
+          response: {
+            gentle: '顺其自然，是最大的智慧。',
+            sober: '控制欲是痛苦的根源。',
+            light: 'Let it go. Let it flow.'
+          },
+          action: {
+            gentle: '听听流水的声音。',
+            sober: '放弃一个原本的计划。',
+            light: '去洗个热水澡。'
+          }
+        },
+        {
+          tag: '#重置',
+          empathy: '觉得糟糕的话，就从现在重新开始。',
+          response: {
+            gentle: '每一个清晨都是新的礼物。',
+            sober: '哪怕是下一秒，也是全新的。',
+            light: '重启试试？'
+          },
+          action: {
+            gentle: '洗把脸。',
+            sober: '整理桌面。',
+            light: '睡一觉再说。'
+          }
+        },
+         {
+          tag: '#独处',
+          empathy: '外面的声音太吵，你需要听听自己的。',
+          response: {
+            gentle: '孤独是灵魂的假期。',
+            sober: '高质量的独处胜过低质量的社交。',
+            light: '享受一个人的狂欢。'
+          },
+          action: {
+            gentle: '戴上耳机，隔绝世界。',
+            sober: '一个人去散步。',
+            light: '关机一小时。'
+          }
+        },
+        {
+          tag: '#简单',
+          empathy: '世界很复杂，但你可以简单。',
+          response: {
+            gentle: '少即是多，慢即是快。',
+            sober: '在这个喧嚣的时代，简单是奢侈品。',
+            light: '断舍离一下。'
+          },
+          action: {
+            gentle: '清理手机相册。',
+            sober: '只做一件最重要的事。',
+            light: '喝白开水。'
+          }
+        },
+        {
+          tag: '#接受',
+          empathy: '有些事情无法改变，那就不变。',
+          response: {
+            gentle: '接纳是改变的开始。',
+            sober: '与不可抗力对抗是徒劳的。',
+            light: '躺平也是一种态度。'
+          },
+          action: {
+            gentle: '承认自己也有无能为力的时候。',
+            sober: '观察一片落叶。',
+            light: '耸耸肩。'
+          }
+        },
+        {
+          tag: '#滋养',
+          empathy: '你是不是很久没有好好照顾这具身体了？',
+          response: {
+            gentle: '你的身体是你灵魂的圣殿。',
+            sober: '透支健康是最赔本的买卖。',
+            light: '身体是革命的本钱。'
+          },
+          action: {
+            gentle: '多喝水。',
+            sober: '早睡一小时。',
+            light: '吃点水果。'
+          }
+        }
+      ];
+
+      const CARDS = Array.from({ length: 6 }).flatMap((_, i) =>
+        BASE_CARDS.map((card, j) => ({
+          ...card,
+          id: generateId('card', i * 20 + j),
+        }))
+      );
+
+      // ----------------------------------------------------------------------
+      // COMPONENTS
+      // ----------------------------------------------------------------------
+
+      // --- NoiseOverlay.tsx ---
+      const NoiseOverlay = () => {
+        return (
+          <div className="fixed inset-0 pointer-events-none z-50 opacity-[0.03] mix-blend-overlay">
+            <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
+              <filter id="noiseFilter">
+                <feTurbulence
+                  type="fractalNoise"
+                  baseFrequency="0.8"
+                  numOctaves="3"
+                  stitchTiles="stitch"
+                />
+              </filter>
+              <rect width="100%" height="100%" filter="url(#noiseFilter)" />
+            </svg>
+          </div>
+        );
+      };
+
+      // --- CardBack.tsx ---
+      const CardBack = ({ className = '' }) => {
+        return (
+          <div className={`w-full h-full bg-[#111] relative overflow-hidden border border-[#554e3d] ${className}`}>
+              {/* Base Gradient */}
+              <div className="absolute inset-0 bg-gradient-to-br from-[#1a1a1a] to-[#050505]" />
+              
+              {/* Geometric Center */}
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] h-[80%] border border-[#3d362a] rounded-full opacity-40"></div>
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[60%] h-[60%] border border-[#3d362a] rounded-full opacity-30"></div>
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[40%] h-[40%] border border-[#3d362a] rounded-full opacity-20"></div>
+
+              {/* Dashed Cross */}
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 h-full w-[1px] bg-gradient-to-b from-transparent via-[#554e3d] to-transparent opacity-30"></div>
+              <div className="absolute top-1/2 left-0 -translate-y-1/2 w-full h-[1px] bg-gradient-to-r from-transparent via-[#554e3d] to-transparent opacity-30"></div>
+
+              {/* Diagonal Lines */}
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-[1px] bg-[#3d362a] rotate-45 opacity-20"></div>
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-[1px] bg-[#3d362a] -rotate-45 opacity-20"></div>
+
+              {/* Dots */}
+              <div className="absolute top-4 left-4 w-1 h-1 bg-[#554e3d] rounded-full opacity-60"></div>
+              <div className="absolute top-4 right-4 w-1 h-1 bg-[#554e3d] rounded-full opacity-60"></div>
+              <div className="absolute bottom-4 left-4 w-1 h-1 bg-[#554e3d] rounded-full opacity-60"></div>
+              <div className="absolute bottom-4 right-4 w-1 h-1 bg-[#554e3d] rounded-full opacity-60"></div>
+          </div>
+        );
+      };
+
+      // --- CardRing.tsx ---
+      const TOTAL_CARDS = 12; // Visual cards in the ring
+      const RADIUS = 320; // Radius of the ring
+      const RADIUS_MOBILE = 160;
+
+      const CardRing = ({ onSelect }) => {
+        const containerRef = useRef(null);
+        const [rotation, setRotation] = useState(0);
+        const [isDragging, setIsDragging] = useState(false);
+        const [startX, setStartX] = useState(0);
+        const [startRotation, setStartRotation] = useState(0);
+        const [hoverIndex, setHoverIndex] = useState(null);
+        const [selectedIndex, setSelectedIndex] = useState(null);
+        
+        const velocityRef = useRef(0);
+        const lastTimeRef = useRef(0);
+        const animationFrameRef = useRef(0);
+        const autoRotateSpeed = 0.05;
+
+        // Handle Dragging
+        const handleStart = (clientX) => {
+          setIsDragging(true);
+          setStartX(clientX);
+          setStartRotation(rotation);
+          velocityRef.current = 0;
+        };
+
+        const handleMove = (clientX) => {
+          if (!isDragging) return;
+          const delta = clientX - startX;
+          // Adjust sensitivity
+          const newRot = startRotation + delta * 0.5;
+          setRotation(newRot);
+          
+          // Calculate velocity
+          const now = performance.now();
+          const dt = now - lastTimeRef.current;
+          if (dt > 0) {
+            velocityRef.current = delta / dt; // Simple velocity
+          }
+          lastTimeRef.current = now;
+        };
+
+        const handleEnd = () => {
+          setIsDragging(false);
+        };
+
+        // Animation Loop (Inertia + Auto Rotate)
+        const animate = useCallback(() => {
+          if (!isDragging && selectedIndex === null) {
+            // Decay velocity
+            velocityRef.current *= 0.95;
+
+            // Auto rotate if stopped
+            if (Math.abs(velocityRef.current) < 0.01) {
+              setRotation(r => r + autoRotateSpeed);
+            } else {
+              setRotation(r => r + velocityRef.current * 5);
+            }
+          }
+          animationFrameRef.current = requestAnimationFrame(animate);
+        }, [isDragging, selectedIndex]);
+
+        useEffect(() => {
+          animationFrameRef.current = requestAnimationFrame(animate);
+          return () => cancelAnimationFrame(animationFrameRef.current);
+        }, [animate]);
+
+        // Touch Events
+        const onTouchStart = (e) => handleStart(e.touches[0].clientX);
+        const onTouchMove = (e) => handleMove(e.touches[0].clientX);
+        
+        // Mouse Events
+        const onMouseDown = (e) => handleStart(e.clientX);
+        const onMouseMove = (e) => handleMove(e.clientX);
+
+        const handleCardClick = (index) => {
+          if (isDragging || Math.abs(velocityRef.current) > 0.1) return; // Prevent click during drag
+          setSelectedIndex(index);
+          setTimeout(() => {
+             onSelect(index);
+          }, 800);
+        };
+
+        return (
+          <div 
+            className="relative w-full h-[60vh] flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing touch-none select-none"
+            ref={containerRef}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={handleEnd}
+            onMouseDown={onMouseDown}
+            onMouseMove={onMouseMove}
+            onMouseUp={handleEnd}
+            onMouseLeave={handleEnd}
+          >
+              {/* The 3D Scene Container */}
+              <div className="scene-3d w-full h-full flex items-center justify-center">
+                  {/* The Ring: Tilted backward */}
+                  <div 
+                      className="relative w-0 h-0"
+                      style={{
+                          transform: `rotateX(65deg) rotateZ(${rotation}deg)`,
+                          transformStyle: 'preserve-3d',
+                          transition: isDragging ? 'none' : 'transform 0.1s linear'
+                      }}
+                  >
+                      {/* Center Core */}
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] rounded-full border border-[#8a7f6b]/20 pointer-events-none"></div>
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[280px] h-[280px] rounded-full border border-[#8a7f6b]/10 border-dashed pointer-events-none"></div>
+
+                      {Array.from({ length: TOTAL_CARDS }).map((_, i) => {
+                          const angleStep = 360 / TOTAL_CARDS;
+                          const angle = i * angleStep;
+                          
+                          const isHovered = hoverIndex === i;
+                          const isSelected = selectedIndex === i;
+                          const isOthersFade = selectedIndex !== null && !isSelected;
+
+                          return (
+                              <div
+                                  key={i}
+                                  className={`absolute top-0 left-0 w-[140px] h-[220px] md:w-[160px] md:h-[260px] origin-center transition-all duration-500 ease-out`}
+                                  style={{
+                                      transform: `
+                                          rotateZ(${angle}deg) 
+                                          translateY(-${typeof window !== 'undefined' && window.innerWidth < 768 ? RADIUS_MOBILE : RADIUS}px) 
+                                          rotateX(-90deg)
+                                          ${isHovered && !selectedIndex ? 'translateZ(30px) scale(1.05)' : ''}
+                                          ${isSelected ? 'translateZ(200px) scale(1.2)' : ''}
+                                      `,
+                                      transformStyle: 'preserve-3d',
+                                      opacity: isOthersFade ? 0 : 1,
+                                      zIndex: isSelected ? 50 : 1
+                                  }}
+                                  onMouseEnter={() => setHoverIndex(i)}
+                                  onMouseLeave={() => setHoverIndex(null)}
+                                  onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleCardClick(i);
+                                  }}
+                              >
+                                  <div className={`w-full h-full shadow-2xl transition-all duration-500 ${isHovered ? 'shadow-yellow-900/40 border-yellow-900/50' : ''}`}>
+                                      <CardBack className={isHovered ? 'border-yellow-700/60' : ''} />
+                                  </div>
+                              </div>
+                          );
+                      })}
+                  </div>
+              </div>
+              
+              {/* Center Instructions */}
+              <div className={`absolute pointer-events-none transition-opacity duration-1000 ${selectedIndex !== null ? 'opacity-0' : 'opacity-60'}`}>
+                   <div className="w-32 h-32 rounded-full border border-[#8a7f6b]/30 flex items-center justify-center animate-pulse">
+                      <span className="text-[10px] tracking-[0.2em] text-[#8a7f6b]">请选择</span>
+                   </div>
+              </div>
+          </div>
+        );
+      };
+
+      // --- App.tsx ---
+      
+      // Icons
+      const BookOpenIcon = () => (
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+      );
+      const XIcon = () => (
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      );
+      const ShareIcon = () => (
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></svg>
+      );
+
+
+      function App() {
+        const [step, setStep] = useState('mood');
+        const [mood, setMood] = useState(null);
+        const [ventText, setVentText] = useState('');
+        const [selectedCard, setSelectedCard] = useState(null);
+        const [tone, setTone] = useState('gentle');
+        const [showHistory, setShowHistory] = useState(false);
+        const [history, setHistory] = useState([]);
+
+        // Load History
+        useEffect(() => {
+          const saved = localStorage.getItem('oracle_history');
+          if (saved) {
+            setHistory(JSON.parse(saved));
+          }
+        }, []);
+
+        // Save to history when a card is revealed
+        const saveToHistory = (card) => {
+          if (!mood) return;
+          const newItem = {
+            id: Date.now().toString(),
+            timestamp: Date.now(),
+            cardId: card.id,
+            mood: mood,
+            tone: 'gentle',
+            userNote: ventText
+          };
+          const newHistory = [newItem, ...history];
+          setHistory(newHistory);
+          localStorage.setItem('oracle_history', JSON.stringify(newHistory));
+        };
+
+        const handleMoodSelect = (m) => {
+          setMood(m);
+          setTimeout(() => setStep('vent'), 400);
+        };
+
+        const handleVentSubmit = () => {
+          setStep('select');
+        };
+
+        const handleCardSelect = (index) => {
+          const randomIndex = Math.floor(Math.random() * CARDS.length);
+          const card = CARDS[randomIndex];
+          setSelectedCard(card);
+          setStep('reveal');
+          saveToHistory(card);
+        };
+
+        const reset = () => {
+          setStep('mood');
+          setMood(null);
+          setVentText('');
+          setSelectedCard(null);
+          setTone('gentle');
+        };
+
+        return (
+          <div className="relative w-full h-screen bg-[#050505] text-[#cfcfcf] overflow-hidden flex flex-col font-serif">
+            <NoiseOverlay />
+
+            {/* Header */}
+            <header className="absolute top-0 left-0 w-full p-6 flex justify-between items-center z-40 pointer-events-none">
+              <div className="opacity-50 text-xs tracking-[0.3em] uppercase">The Quiet Oracle</div>
+              <button 
+                onClick={() => setShowHistory(true)}
+                className="pointer-events-auto p-2 opacity-60 hover:opacity-100 transition-opacity"
+              >
+                <BookOpenIcon />
+              </button>
+            </header>
+
+            {/* Main Content Area */}
+            <main className="flex-1 flex flex-col items-center justify-center relative z-10 w-full max-w-lg mx-auto px-6">
+              
+              {/* Step 1: Mood */}
+              {step === 'mood' && (
+                <div className="w-full animate-fadeIn flex flex-col items-center space-y-12">
+                  <h2 className="text-sm tracking-widest text-[#8a8a8a] mb-4">你现在的状态，更接近哪一种？</h2>
+                  <div className="grid grid-cols-2 gap-4 w-full">
+                    {MOODS.map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => handleMoodSelect(m.id)}
+                        className={`
+                          py-4 px-6 border border-[#2a2a2a] text-[#8a8a8a] hover:text-[#e0e0e0] hover:border-[#5a5a5a] 
+                          transition-all duration-500 rounded-sm text-sm tracking-widest
+                          ${mood === m.id ? 'bg-[#1a1a1a] border-[#8a7f6b] text-[#e0e0e0] shadow-[0_0_15px_rgba(138,127,107,0.2)]' : ''}
+                        `}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Step 2: Vent */}
+              {step === 'vent' && (
+                <div className="w-full animate-fadeIn flex flex-col items-center">
+                  <p className="text-[#e0e0e0] tracking-widest mb-2 text-center">如果你愿意，可以写下一点今天的事。</p>
+                  <p className="text-[#555] text-xs mb-10 text-center">几个词也可以，不用完整。</p>
+                  
+                  <textarea
+                    className="w-full h-40 bg-transparent border-none outline-none resize-none text-center text-[#e0e0e0] placeholder-[#333] text-lg leading-relaxed focus:ring-0"
+                    placeholder="今天发生了什么……"
+                    value={ventText}
+                    onChange={(e) => setVentText(e.target.value)}
+                    spellCheck={false}
+                  />
+
+                  <button
+                    onClick={handleVentSubmit}
+                    className="mt-12 py-3 px-10 border-b border-[#333] text-[#8a8a8a] hover:text-[#e0e0e0] hover:border-[#8a7f6b] transition-all duration-500 tracking-[0.2em] text-sm"
+                  >
+                    进入牌室
+                  </button>
+                </div>
+              )}
+
+              {/* Step 3: Selection */}
+              {step === 'select' && (
+                <div className="w-full h-full flex flex-col justify-center animate-fadeIn">
+                   <CardRing onSelect={handleCardSelect} />
+                </div>
+              )}
+
+              {/* Step 4: Reveal */}
+              {step === 'reveal' && selectedCard && (
+                  <div className="w-full h-full absolute inset-0 bg-[#050505] z-50 flex flex-col items-center justify-center animate-slowReveal">
+                      {/* Card Container */}
+                      <div className="relative w-full max-w-md p-8 min-h-[70vh] flex flex-col items-center text-center">
+                          
+                          {/* Top decoration */}
+                          <div className="w-px h-12 bg-gradient-to-b from-transparent to-[#8a7f6b]/50 mb-8"></div>
+
+                          {/* Empathy Phase */}
+                          <div className="mb-12 opacity-80 transition-opacity duration-1000 delay-300">
+                              <p className="text-[#a0a0a0] text-sm tracking-widest leading-loose">
+                                  {selectedCard.empathy}
+                              </p>
+                          </div>
+
+                          {/* Core Response */}
+                          <div className="mb-16 relative">
+                               {/* Subtle glowing backdrop for text */}
+                              <div className="absolute inset-0 bg-[#8a7f6b]/5 blur-3xl rounded-full"></div>
+                              <h1 className="relative text-xl md:text-2xl text-[#f0f0f0] font-light leading-relaxed tracking-widest transition-all duration-500">
+                                  {selectedCard.response[tone]}
+                              </h1>
+                          </div>
+
+                          {/* Micro Action */}
+                          <div className="mb-12">
+                              <div className="w-4 h-px bg-[#333] mx-auto mb-6"></div>
+                              <p className="text-[#8a8a8a] text-xs tracking-wider">
+                                  {selectedCard.action[tone]}
+                              </p>
+                          </div>
+
+                          {/* Tag */}
+                          <div className="mt-auto mb-8">
+                              <span className="text-[10px] text-[#444] border border-[#222] px-2 py-1 rounded-full tracking-widest">
+                                  {selectedCard.tag}
+                              </span>
+                          </div>
+
+                      </div>
+
+                      {/* Footer Controls */}
+                      <div className="fixed bottom-10 left-0 w-full flex flex-col items-center gap-6 z-50">
+                          {/* Tone Switcher */}
+                          <div className="flex gap-6 text-xs tracking-widest text-[#555]">
+                              {['gentle', 'sober', 'light'].map((t) => (
+                                  <button
+                                      key={t}
+                                      onClick={() => setTone(t)}
+                                      className={`transition-colors duration-300 ${tone === t ? 'text-[#c0bba8]' : 'hover:text-[#888]'}`}
+                                  >
+                                      {t === 'gentle' ? '温柔' : t === 'sober' ? '清醒' : '轻松'}
+                                  </button>
+                              ))}
+                          </div>
+
+                          <div className="flex gap-4">
+                              <button onClick={reset} className="text-[#444] hover:text-[#8a8a8a] text-xs tracking-widest transition-colors py-2 px-4">
+                                  再次进入
+                              </button>
+                          </div>
+                      </div>
+                  </div>
+              )}
+
+            </main>
+
+            {/* History Drawer */}
+            {showHistory && (
+                <div className="absolute inset-0 z-[60] flex justify-end">
+                    <div 
+                      className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                      onClick={() => setShowHistory(false)}
+                    ></div>
+                    <div className="relative w-full max-w-sm h-full bg-[#0c0c0c] border-l border-[#222] p-6 overflow-y-auto no-scrollbar shadow-2xl transform transition-transform duration-300">
+                        <div className="flex justify-between items-center mb-10">
+                            <h3 className="text-[#8a7f6b] text-xs tracking-[0.2em] uppercase">我的卡册</h3>
+                            <button onClick={() => setShowHistory(false)} className="text-[#666] hover:text-white">
+                              <XIcon />
+                            </button>
+                        </div>
+                        
+                        <div className="space-y-6">
+                            {history.length === 0 ? (
+                                <div className="text-[#444] text-xs text-center mt-20">暂无记录</div>
+                            ) : (
+                                history.map((item) => {
+                                    const card = CARDS.find(c => c.id === item.cardId);
+                                    if (!card) return null;
+                                    return (
+                                        <div key={item.id} className="border border-[#222] p-4 rounded-sm hover:border-[#333] transition-colors">
+                                            <div className="flex justify-between items-center mb-3">
+                                                <span className="text-[10px] text-[#555]">{new Date(item.timestamp).toLocaleDateString()}</span>
+                                                <span className="text-[10px] text-[#8a7f6b] border border-[#8a7f6b]/20 px-1.5 py-0.5 rounded-full">
+                                                  {MOODS.find(m => m.id === item.mood)?.label}
+                                                </span>
+                                            </div>
+                                            <div className="text-sm text-[#ccc] mb-2 font-light">{card.response.gentle}</div>
+                                            <div className="text-[10px] text-[#555]">{card.tag}</div>
+                                        </div>
+                                    )
+                                })
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+          </div>
+        );
+      }
+
+      // ----------------------------------------------------------------------
+      // MOUNT
+      // ----------------------------------------------------------------------
+      const rootElement = document.getElementById('root');
+      const root = ReactDOM.createRoot(rootElement);
+      root.render(
+        <React.StrictMode>
+          <App />
+        </React.StrictMode>
+      );
+    </script>
+  </body>
+</html>
